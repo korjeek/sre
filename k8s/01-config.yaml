@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: sre
+data:
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  STATIC_DIR: "/app/web"
+  MIGRATIONS_DIR: "/app/migrations"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: sre
+type: Opaque
+stringData:
+  POSTGRES_USER: "sre"
+  POSTGRES_PASSWORD: "sre"
+  POSTGRES_DB: "incidents"
+  DATABASE_URL: "postgres://sre:sre@postgres:5432/incidents?sslmode=disable"

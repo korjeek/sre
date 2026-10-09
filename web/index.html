@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SRE Incident Tracker</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>SRE Incident Tracker</h1>
+    <p>Учёт сервисов и инцидентов. CRUD через REST API.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Сервисы</h2>
+      <form id="service-form">
+        <input type="hidden" name="id" />
+        <label>Имя <input name="name" required /></label>
+        <label>Владелец <input name="owner" required /></label>
+        <label>Описание <input name="description" /></label>
+        <button type="submit">Сохранить сервис</button>
+        <button type="button" id="service-reset" hidden>Отмена</button>
+      </form>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Имя</th><th>Владелец</th><th>Описание</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="services-body"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Инциденты</h2>
+      <form id="incident-form">
+        <input type="hidden" name="id" />
+        <label>Сервис
+          <select name="service_id" required></select>
+        </label>
+        <label>Заголовок <input name="title" required /></label>
+        <label>Описание <input name="description" /></label>
+        <label>Критичность
+          <select name="severity">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+          </select>
+        </label>
+        <label>Статус
+          <select name="status">
+            <option value="open" selected>open</option>
+            <option value="investigating">investigating</option>
+            <option value="resolved">resolved</option>
+          </select>
+        </label>
+        <button type="submit">Сохранить инцидент</button>
+        <button type="button" id="incident-reset" hidden>Отмена</button>
+      </form>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Сервис</th><th>Заголовок</th><th>Severity</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="incidents-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <p id="error" class="error" hidden></p>
+  <script src="/app.js"></script>
+</body>
+</html>
