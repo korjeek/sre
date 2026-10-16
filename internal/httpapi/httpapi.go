@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -225,15 +227,42 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 func (s *Server) requestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rw := &statusWriter{ResponseWriter: w, status: 200}
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = newRequestID()
+		}
+		w.Header().Set("X-Request-ID", reqID)
+
+		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		s.log.Info("http",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rw.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+
+		level := slog.LevelInfo
+		switch {
+		case r.URL.Path == "/healthz":
+			level = slog.LevelDebug
+		case rw.status >= 500:
+			level = slog.LevelError
+		case rw.status >= 400:
+			level = slog.LevelWarn
+		}
+
+		s.log.LogAttrs(r.Context(), level, "http request",
+			slog.String("request_id", reqID),
+			slog.String("http.method", r.Method),
+			slog.String("http.path", r.URL.Path),
+			slog.String("http.route", r.Pattern),
+			slog.Int("http.status_code", rw.status),
+			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 		)
 	})
+}
+
+func newRequestID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(b)
 }
 
 type statusWriter struct {

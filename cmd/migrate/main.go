@@ -18,7 +18,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log := logger.New(cfg.LogLevel)
+	log := logger.New(cfg.LogLevel, "sre-migrate")
 
 	dir := getenv("MIGRATIONS_DIR", "migrations")
 	ctx := context.Background()

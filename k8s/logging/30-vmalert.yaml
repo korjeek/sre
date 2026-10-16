@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules
+  namespace: logging
+data:
+  rules.yml: |
+    groups:
+      - name: sre-api-logs
+        type: vlogs
+        interval: 30s
+        rules:
+          - alert: ApiErrorLogs
+            expr: 'service.name:"sre-api" level:error | stats by (service.name) count() as errors | filter errors:>0'
+            labels:
+              severity: warning
+            annotations:
+              summary: "sre-api пишет логи level=error"
+              description: "{{ $value }} error-записей за последние 30s"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+  namespace: logging
+  labels:
+    app: vmalert
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmalert
+  template:
+    metadata:
+      labels:
+        app: vmalert
+    spec:
+      containers:
+        - name: vmalert
+          image: victoriametrics/vmalert:v1.143.0
+          args:
+            - -rule=/etc/vmalert/rules.yml
+            - -datasource.url=http://victoria-logs.logging.svc.cluster.local:9428
+            - -rule.defaultRuleType=vlogs
+            - -notifier.blackhole
+            - -httpListenAddr=:8880
+          ports:
+            - name: http
+              containerPort: 8880
+          volumeMounts:
+            - name: rules
+              mountPath: /etc/vmalert
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: rules
+          configMap:
+            name: vmalert-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+  namespace: logging
+spec:
+  selector:
+    app: vmalert
+  ports:
+    - name: http
+      port: 8880
+      targetPort: http

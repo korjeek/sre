@@ -21,7 +21,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log := logger.New(cfg.LogLevel)
+	log := logger.New(cfg.LogLevel, "sre-api")
 	log.Info("starting api", "port", cfg.Port)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
