@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sre-incident-tracker/internal/metrics"
 	"strconv"
 	"strings"
 	"time"
@@ -21,10 +22,11 @@ type Server struct {
 	store     *store.Store
 	log       *slog.Logger
 	staticDir string
+	metrics   *metrics.Metrics
 }
 
-func New(st *store.Store, log *slog.Logger, staticDir string) http.Handler {
-	s := &Server{store: st, log: log, staticDir: staticDir}
+func New(st *store.Store, log *slog.Logger, staticDir string, m *metrics.Metrics) http.Handler {
+	s := &Server{store: st, log: log, staticDir: staticDir, metrics: m}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", s.health)
@@ -86,6 +88,7 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.metrics.ServiceCreated()
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -121,6 +124,7 @@ func (s *Server) deleteService(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.metrics.ServiceDeleted()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -161,6 +165,7 @@ func (s *Server) createIncident(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.metrics.IncidentCreated(item.Severity)
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -179,10 +184,19 @@ func (s *Server) updateIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.ID = id
+	prev, err := s.store.GetIncident(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	item, err := s.store.UpdateIncident(r.Context(), in)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	if prev.Status != item.Status {
+		s.metrics.IncidentStatusChanged(prev.Status, item.Status, item.Severity,
+			item.UpdatedAt.Sub(prev.CreatedAt))
 	}
 	writeJSON(w, http.StatusOK, item)
 }
@@ -196,6 +210,7 @@ func (s *Server) deleteIncident(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.metrics.IncidentDeleted()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -234,7 +249,11 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", reqID)
 
 		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		s.metrics.HTTPInFlightInc()
 		next.ServeHTTP(rw, r)
+		s.metrics.HTTPInFlightDec()
+		elapsed := time.Since(start)
+		s.metrics.ObserveHTTP(r.Method, routeLabel(r.Pattern), rw.status, elapsed)
 
 		level := slog.LevelInfo
 		switch {
@@ -255,6 +274,16 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 		)
 	})
+}
+
+func routeLabel(pattern string) string {
+	if pattern == "" {
+		return "unmatched"
+	}
+	if i := strings.IndexByte(pattern, ' '); i >= 0 {
+		return pattern[i+1:]
+	}
+	return pattern
 }
 
 func newRequestID() string {

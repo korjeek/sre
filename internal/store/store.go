@@ -168,3 +168,30 @@ func (s *Store) DeleteIncident(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+func (s *Store) IncidentCounts(ctx context.Context) ([]models.IncidentCount, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT status, severity, count(*)
+		FROM incidents
+		GROUP BY status, severity`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.IncidentCount
+	for rows.Next() {
+		var item models.IncidentCount
+		if err := rows.Scan(&item.Status, &item.Severity, &item.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) ServicesCount(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM services`).Scan(&n)
+	return n, err
+}

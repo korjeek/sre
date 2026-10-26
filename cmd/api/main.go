@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sre-incident-tracker/internal/metrics"
 	"syscall"
 	"time"
 
@@ -34,7 +35,10 @@ func main() {
 	}
 	defer pool.Close()
 
-	handler := httpapi.New(store.New(pool), log, cfg.StaticDir)
+	st := store.New(pool)
+	appMetrics := metrics.New(st, log)
+
+	handler := httpapi.New(st, log, cfg.StaticDir, appMetrics)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
@@ -44,10 +48,24 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	errCh := make(chan error, 1)
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", appMetrics.Handler())
+	metricsSrv := &http.Server{
+		Addr:              ":" + cfg.MetricsPort,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+	}
+
+	errCh := make(chan error, 2)
 	go func() {
 		log.Info("listening", "addr", srv.Addr)
 		errCh <- srv.ListenAndServe()
+	}()
+	go func() {
+		log.Info("metrics listening", "addr", metricsSrv.Addr)
+		errCh <- metricsSrv.ListenAndServe()
 	}()
 
 	select {

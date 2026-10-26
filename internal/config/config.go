@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Port        string
+	MetricsPort string
 	DatabaseURL string
 	LogLevel    string
 	StaticDir   string
@@ -16,6 +17,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port:        getenv("PORT", "8080"),
+		MetricsPort: getenv("METRICS_PORT", "9090"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		LogLevel:    strings.ToLower(getenv("LOG_LEVEL", "info")),
 		StaticDir:   getenv("STATIC_DIR", "web"),
