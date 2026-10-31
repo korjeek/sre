@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sre-incident-tracker/internal/chaos"
 	"sre-incident-tracker/internal/metrics"
 	"syscall"
 	"time"
@@ -38,7 +39,12 @@ func main() {
 	st := store.New(pool)
 	appMetrics := metrics.New(st, log)
 
-	handler := httpapi.New(st, log, cfg.StaticDir, appMetrics)
+	chaosCfg := chaos.Config{ErrorRate: cfg.ChaosErrorRate, Latency: cfg.ChaosLatency}
+	if chaosCfg.Enabled() {
+		log.Warn("chaos mode enabled", "error_rate", chaosCfg.ErrorRate, "latency", chaosCfg.Latency.String())
+	}
+
+	handler := httpapi.New(st, log, cfg.StaticDir, appMetrics, chaosCfg)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,

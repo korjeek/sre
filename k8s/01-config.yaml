@@ -11,6 +11,8 @@ data:
   MIGRATIONS_DIR: "/app/migrations"
   APP_ENV: "minikube"
   APP_VERSION: "1.1.0"
+  CHAOS_ERROR_RATE: "0"
+  CHAOS_LATENCY_MS: "0"
 ---
 apiVersion: v1
 kind: Secret

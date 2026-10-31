@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prober
+  namespace: sre
+  labels:
+    app: prober
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prober
+  template:
+    metadata:
+      labels:
+        app: prober
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: prober
+          image: sre-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/app/prober"]
+          env:
+            - name: PROBE_TARGET_URL
+              value: "http://api.sre.svc.cluster.local"
+            - name: PROBE_INTERVAL
+              value: "5s"
+            - name: PROBE_TIMEOUT
+              value: "2s"
+            - name: PROBE_SLOW_THRESHOLD
+              value: "500ms"
+            - name: METRICS_PORT
+              value: "9091"
+            - name: APP_ENV
+              value: "minikube"
+          ports:
+            - containerPort: 9091
+              name: metrics
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi

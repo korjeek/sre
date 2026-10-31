@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sre-incident-tracker/internal/chaos"
 	"sre-incident-tracker/internal/metrics"
 	"strconv"
 	"strings"
@@ -25,22 +26,27 @@ type Server struct {
 	metrics   *metrics.Metrics
 }
 
-func New(st *store.Store, log *slog.Logger, staticDir string, m *metrics.Metrics) http.Handler {
+func New(st *store.Store, log *slog.Logger, staticDir string, m *metrics.Metrics, ch chaos.Config) http.Handler {
 	s := &Server{store: st, log: log, staticDir: staticDir, metrics: m}
+	m.SetChaos(ch.ErrorRate, ch.Latency)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /healthz", s.health)
-	mux.HandleFunc("GET /api/services", s.listServices)
-	mux.HandleFunc("POST /api/services", s.createService)
-	mux.HandleFunc("GET /api/services/{id}", s.getService)
-	mux.HandleFunc("PUT /api/services/{id}", s.updateService)
-	mux.HandleFunc("DELETE /api/services/{id}", s.deleteService)
+	api := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, chaos.Wrap(ch, h))
+	}
 
-	mux.HandleFunc("GET /api/incidents", s.listIncidents)
-	mux.HandleFunc("POST /api/incidents", s.createIncident)
-	mux.HandleFunc("GET /api/incidents/{id}", s.getIncident)
-	mux.HandleFunc("PUT /api/incidents/{id}", s.updateIncident)
-	mux.HandleFunc("DELETE /api/incidents/{id}", s.deleteIncident)
+	mux.HandleFunc("GET /healthz", s.health)
+	api("GET /api/services", s.listServices)
+	api("POST /api/services", s.createService)
+	api("GET /api/services/{id}", s.getService)
+	api("PUT /api/services/{id}", s.updateService)
+	api("DELETE /api/services/{id}", s.deleteService)
+
+	api("GET /api/incidents", s.listIncidents)
+	api("POST /api/incidents", s.createIncident)
+	api("GET /api/incidents/{id}", s.getIncident)
+	api("PUT /api/incidents/{id}", s.updateIncident)
+	api("DELETE /api/incidents/{id}", s.deleteIncident)
 
 	mux.Handle("GET /", s.staticHandler())
 

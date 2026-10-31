@@ -41,6 +41,9 @@ type Metrics struct {
 	incidentsDeleted    prometheus.Counter
 	incidentTransitions *prometheus.CounterVec
 	resolutionDuration  *prometheus.HistogramVec
+
+	chaosErrorRate prometheus.Gauge
+	chaosLatency   prometheus.Gauge
 }
 
 func New(src StateSource, log *slog.Logger) *Metrics {
@@ -102,6 +105,15 @@ func New(src StateSource, log *slog.Logger) *Metrics {
 				4 * 3600, 12 * 3600, 24 * 3600, 3 * 24 * 3600, 7 * 24 * 3600,
 			},
 		}, []string{"severity"}),
+
+		chaosErrorRate: f.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace, Name: "chaos_error_rate",
+			Help: "Доля запросов /api, на которые намеренно отвечаем 503 (0 — режим выключен).",
+		}),
+		chaosLatency: f.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace, Name: "chaos_latency_seconds",
+			Help: "Искусственная задержка запросов /api в секундах (0 — режим выключен).",
+		}),
 	}
 
 	for _, sev := range Severities {
@@ -128,6 +140,11 @@ func (m *Metrics) Handler() http.Handler {
 		Registry:          m.registry,
 		EnableOpenMetrics: true,
 	})
+}
+
+func (m *Metrics) SetChaos(errorRate float64, latency time.Duration) {
+	m.chaosErrorRate.Set(errorRate)
+	m.chaosLatency.Set(latency.Seconds())
 }
 
 func (m *Metrics) HTTPInFlightInc() { m.httpInFlight.Inc() }

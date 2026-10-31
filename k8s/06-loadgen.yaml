@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: sre
+  labels:
+    app: loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                curl -s -o /dev/null -m 3 http://api.sre.svc.cluster.local/api/services
+                curl -s -o /dev/null -m 3 http://api.sre.svc.cluster.local/api/incidents
+                sleep 0.5
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+            limits:
+              memory: 32Mi

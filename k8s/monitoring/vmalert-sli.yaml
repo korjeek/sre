@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-sli-rules
+  namespace: monitoring
+data:
+  rules.yml: |
+    groups:
+      # ---------- SLI: мгновенные индикаторы, пересчёт каждые 30 с ----------
+      - name: sli
+        interval: 30s
+        rules:
+          # SLI-1 (RBSLO): доля запросов /api, завершившихся не 5xx, за 5 минут
+          - record: sli:availability:ratio_5m
+            expr: |
+              (sum(increase_pure(sre_http_requests_total{route=~"/api/.*",code!~"5.."}[5m])) or vector(0))
+              /
+              sum(increase_pure(sre_http_requests_total{route=~"/api/.*"}[5m]))
+
+          # SLI-2 (RBSLO): доля запросов /api быстрее 250 мс (порог SLO), за 5 минут
+          - record: sli:latency_250ms:ratio_5m
+            expr: |
+              (sum(increase_pure(sre_http_request_duration_seconds_bucket{route=~"/api/.*",le="0.25"}[5m])) or vector(0))
+              /
+              sum(increase_pure(sre_http_request_duration_seconds_count{route=~"/api/.*"}[5m]))
+
+          # То же для порога SLA — 500 мс
+          - record: sli:latency_500ms:ratio_5m
+            expr: |
+              (sum(increase_pure(sre_http_request_duration_seconds_bucket{route=~"/api/.*",le="0.5"}[5m])) or vector(0))
+              /
+              sum(increase_pure(sre_http_request_duration_seconds_count{route=~"/api/.*"}[5m]))
+
+          # SLI-3 (TBSLO): доля успешных быстрых проверок пробера за последнюю минуту
+          - record: sli:probe_good:ratio_1m
+            expr: |
+              (sum(increase_pure(sre_probe_runs_total{result="ok"}[1m])) or vector(0))
+              /
+              sum(increase_pure(sre_probe_runs_total[1m]))
+
+          # "Хорошая минута": 1, если не менее 95% проверок за минуту были ok; 0 — иначе.
+          # Нет данных от пробера (он сам лежит) — считаем минуту плохой.
+          - record: sli:probe:good_minute
+            expr: |
+              (
+                (
+                  (sum(increase_pure(sre_probe_runs_total{result="ok"}[1m])) or vector(0))
+                  /
+                  sum(increase_pure(sre_probe_runs_total[1m]))
+                ) >= bool 0.95
+              ) or vector(0)
+
+          # SLI-4 (TBSLO): 1, если PostgreSQL доступен (pg_up); нет метрики — БД недоступна
+          - record: sli:db_up:good
+            expr: sum(pg_up) or vector(0)
+
+      # ---------- SLO/SLA: скользящее окно. Для демо 1 час, в проде 30d ----------
+      - name: slo
+        interval: 1m
+        rules:
+          - record: slo:availability:ratio_1h
+            expr: |
+              (sum(increase_pure(sre_http_requests_total{route=~"/api/.*",code!~"5.."}[1h])) or vector(0))
+              /
+              sum(increase_pure(sre_http_requests_total{route=~"/api/.*"}[1h]))
+
+          - record: slo:latency_250ms:ratio_1h
+            expr: |
+              (sum(increase_pure(sre_http_request_duration_seconds_bucket{route=~"/api/.*",le="0.25"}[1h])) or vector(0))
+              /
+              sum(increase_pure(sre_http_request_duration_seconds_count{route=~"/api/.*"}[1h]))
+
+          - record: slo:latency_500ms:ratio_1h
+            expr: |
+              (sum(increase_pure(sre_http_request_duration_seconds_bucket{route=~"/api/.*",le="0.5"}[1h])) or vector(0))
+              /
+              sum(increase_pure(sre_http_request_duration_seconds_count{route=~"/api/.*"}[1h]))
+
+          # доля "хороших минут" (TBSLO)
+          - record: slo:probe:good_minutes_ratio_1h
+            expr: avg_over_time(sli:probe:good_minute[1h])
+
+          # доля времени, когда БД была доступна (TBSLO)
+          - record: slo:db_up:good_ratio_1h
+            expr: avg_over_time(sli:db_up:good[1h])
+
+      # ---------- Алерты на сгорание бюджета ошибок ----------
+      - name: slo-alerts
+        interval: 30s
+        rules:
+          # burn rate = (1 - SLI) / (1 - SLO). 14.4 — бюджет за 30 дней уйдёт за ~2 дня.
+          - alert: AvailabilityBudgetBurnFast
+            expr: (1 - sli:availability:ratio_5m) / (1 - 0.995) > 14.4
+            for: 1m
+            labels:
+              severity: page
+              slo: availability
+            annotations:
+              summary: "SLO доступности сгорает слишком быстро"
+              description: "burn rate {{ $value | printf \"%.1f\" }} (порог 14.4)"
+
+          - alert: LatencySLOBreach
+            expr: sli:latency_250ms:ratio_5m < 0.95
+            for: 1m
+            labels:
+              severity: warning
+              slo: latency
+            annotations:
+              summary: "Менее 95% запросов укладываются в 250 мс"
+              description: "SLI = {{ $value | printf \"%.3f\" }}"
+
+          - alert: SyntheticProbeBadMinute
+            expr: sli:probe:good_minute == 0
+            for: 1m
+            labels:
+              severity: warning
+              slo: probe
+            annotations:
+              summary: "Пробер видит плохие минуты"
+              description: "Менее 95% проверок успешны и быстры"
+
+          - alert: DatabaseDown
+            expr: sli:db_up:good == 0
+            for: 30s
+            labels:
+              severity: page
+              slo: database
+            annotations:
+              summary: "PostgreSQL недоступен (pg_up = 0 или метрика пропала)"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert-sli
+  namespace: monitoring
+  labels:
+    app: vmalert-sli
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmalert-sli
+  template:
+    metadata:
+      labels:
+        app: vmalert-sli
+    spec:
+      containers:
+        - name: vmalert
+          image: victoriametrics/vmalert:v1.143.0
+          args:
+            - -rule=/etc/vmalert/rules.yml
+            - -datasource.url=http://vm-single-victoria-metrics-single-server.monitoring.svc.cluster.local:8428
+            - -remoteWrite.url=http://vm-single-victoria-metrics-single-server.monitoring.svc.cluster.local:8428
+            - -remoteRead.url=http://vm-single-victoria-metrics-single-server.monitoring.svc.cluster.local:8428
+            - -notifier.blackhole
+            - -httpListenAddr=:8880
+          ports:
+            - name: http
+              containerPort: 8880
+          volumeMounts:
+            - name: rules
+              mountPath: /etc/vmalert
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: rules
+          configMap:
+            name: vmalert-sli-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert-sli
+  namespace: monitoring
+spec:
+  selector:
+    app: vmalert-sli
+  ports:
+    - name: http
+      port: 8880
+      targetPort: http
